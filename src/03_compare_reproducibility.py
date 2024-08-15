@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 from feature import Feature
 from proteoform import Proteoform
 from itertools import groupby
+from scipy.stats import pearsonr
 import matplotlib.ticker as ticker
 
 
@@ -709,3 +710,120 @@ if __name__ == '__main__':
     overlap_coefficient_proteins = common/min(len(DDA_proteins_1), len(DDA_proteins_2))
     print("DDA: common proteoforms", len(common_proteoforms_DDA), "(" + str(round(100 * overlap_coefficient_proteoforms, 3)) + "%)",
           "- common proteins", common, "(" + str(round(100*overlap_coefficient_proteins, 3)) + "%)")
+
+    # ##############################
+    # Compute correlation coefficient between intensitoes of common proteoforms from DDA and DIA
+    print("*** Intensity coefficient of data ***")
+    dda_corr = []
+    dia_corr = []
+    for i in range(0, len(mass_ranges)):
+        print("Processing mz_range: ["+mass_ranges[i]+"]")
+        dia_proteoforms_rep1 = all_dia_proteoforms_1[i]
+        dda_proteoforms_rep1 = all_dda_proteoforms_1[i]
+        dia_proteoforms_rep2 = all_dia_proteoforms_2[i]
+        dda_proteoforms_rep2 = all_dda_proteoforms_2[i]
+        common_proteoforms_acquisition_1 = get_common_proteoforms(dia_proteoforms_rep1, dda_proteoforms_rep1)
+        common_proteoforms_acquisition_2 = get_common_proteoforms(dia_proteoforms_rep2, dda_proteoforms_rep2)
+
+        dia_proteoforms_rep1 = [i[0] for i in common_proteoforms_acquisition_1]
+        for p in dia_proteoforms_rep1:
+            if hasattr(p, 'used'):
+                delattr(p, 'used')
+        dia_proteoforms_rep2 = [i[0] for i in common_proteoforms_acquisition_2]
+        for p in dia_proteoforms_rep2:
+            if hasattr(p, 'used'):
+                delattr(p, 'used')
+        dda_proteoforms_rep1 = [i[1] for i in common_proteoforms_acquisition_1]
+        for p in dda_proteoforms_rep1:
+            if hasattr(p, 'used'):
+                delattr(p, 'used')
+        dda_proteoforms_rep2 = [i[1] for i in common_proteoforms_acquisition_2]
+        for p in dda_proteoforms_rep2:
+            if hasattr(p, 'used'):
+                delattr(p, 'used')
+
+        common_proteoforms = get_common_proteoforms(dia_proteoforms_rep1, dia_proteoforms_rep2)
+        replicate_1_common_inte = [math.log2(float(i[0].intensity)) for i in common_proteoforms]
+        replicate_2_common_inte = [math.log2(float(i[1].intensity)) for i in common_proteoforms]
+        corr = pearsonr(replicate_1_common_inte, replicate_2_common_inte)[0]
+        print("DIA Inte Corr: ", corr)
+        dia_corr.append(corr)
+
+        common_proteoforms = get_common_proteoforms(dda_proteoforms_rep1, dda_proteoforms_rep2)
+        replicate_1_common_inte = [math.log2(float(i[0].intensity)) for i in common_proteoforms]
+        replicate_2_common_inte = [math.log2(float(i[1].intensity)) for i in common_proteoforms]
+        corr = pearsonr(replicate_1_common_inte, replicate_2_common_inte)[0]
+        print("DDA Inte Corr: ", corr)
+        dda_corr.append(corr)
+
+    width = 0.4
+    r = np.arange(len(mass_ranges))
+    fig = plt.Figure()
+    plt.plot(r, dia_corr, '--o', label='DIA')
+    plt.plot(r, dda_corr, '--o', label='DDA')
+    plt.xticks(r, ['[720-800]', '[800-880]', '[880-960]', '[960-1040]', '[1040-1120]', '[1120-1200]'], rotation=25)
+    plt.ylabel("Abundance correlation")
+    combined_legend_labels = ['DIA', 'DDA']
+    plt.legend(combined_legend_labels, ncol=len(combined_legend_labels), bbox_to_anchor=(0.5, 1.2),  loc='upper center')
+    plt.tight_layout()
+    # plt.savefig("01_shared_proteoforms_corr.png", dpi=2000, bbox_inches='tight')
+    plt.show()
+    plt.close()
+
+    #####################################################
+    # Combined proteoform correlation
+    DIA_proteoforms_data_rep_1 = [i[0] for i in common_proteoforms_DIA]
+    for p in DIA_proteoforms_data_rep_1:
+        if hasattr(p, 'used'):
+            delattr(p, 'used')
+
+    DIA_proteoforms_data_rep_2 = [i[1] for i in common_proteoforms_DIA]
+    for p in DIA_proteoforms_data_rep_2:
+        if hasattr(p, 'used'):
+            delattr(p, 'used')
+
+    DDA_proteoforms_data_rep_1 = [i[0] for i in common_proteoforms_DDA]
+    for p in DDA_proteoforms_data_rep_1:
+        if hasattr(p, 'used'):
+            delattr(p, 'used')
+
+    DDA_proteoforms_data_rep_2 = [i[1] for i in common_proteoforms_DDA]
+    for p in DDA_proteoforms_data_rep_2:
+        if hasattr(p, 'used'):
+            delattr(p, 'used')
+
+    common_proteoforms_rep1 = get_common_proteoforms(DIA_proteoforms_data_rep_1, DDA_proteoforms_data_rep_1)
+    common_proteoforms_rep2 = get_common_proteoforms(DIA_proteoforms_data_rep_2, DDA_proteoforms_data_rep_2)
+
+    DIA_proteoforms_data_rep_1 = [i[0] for i in common_proteoforms_rep1]
+    for p in DIA_proteoforms_data_rep_1:
+        if hasattr(p, 'used'):
+            delattr(p, 'used')
+
+    DIA_proteoforms_data_rep_2 = [i[0] for i in common_proteoforms_rep2]
+    for p in DIA_proteoforms_data_rep_2:
+        if hasattr(p, 'used'):
+            delattr(p, 'used')
+
+    DDA_proteoforms_data_rep_1 = [i[1] for i in common_proteoforms_rep1]
+    for p in DDA_proteoforms_data_rep_1:
+        if hasattr(p, 'used'):
+            delattr(p, 'used')
+
+    DDA_proteoforms_data_rep_2 = [i[1] for i in common_proteoforms_rep2]
+    for p in DDA_proteoforms_data_rep_2:
+        if hasattr(p, 'used'):
+            delattr(p, 'used')
+
+    print("*** Overall Correlation ***")
+    common_proteoforms_DIA = get_common_proteoforms(DIA_proteoforms_data_rep_1, DIA_proteoforms_data_rep_2)
+    replicate_1_common_inte = [math.log2(float(i[0].intensity)) for i in common_proteoforms_DIA]
+    replicate_2_common_inte = [math.log2(float(i[1].intensity)) for i in common_proteoforms_DIA]
+    corr = pearsonr(replicate_1_common_inte, replicate_2_common_inte)[0]
+    print("DIA CORR:", corr)
+
+    common_proteoforms_DDA = get_common_proteoforms(DDA_proteoforms_data_rep_1, DDA_proteoforms_data_rep_2)
+    replicate_1_common_inte = [math.log2(float(i[0].intensity)) for i in common_proteoforms_DDA]
+    replicate_2_common_inte = [math.log2(float(i[1].intensity)) for i in common_proteoforms_DDA]
+    corr = pearsonr(replicate_1_common_inte, replicate_2_common_inte)[0]
+    print("DDA CORR:", corr)
