@@ -29,6 +29,7 @@ from sklearn.metrics import balanced_accuracy_score
 from sklearn.metrics import roc_auc_score, roc_curve
 from proteoform import Proteoform
 from read_msalign import read_spec_file
+from feature import Feature
 
 
 def get_rt_dictionary(mzML_file, isolation_window_base):
