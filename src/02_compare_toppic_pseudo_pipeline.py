@@ -14,18 +14,34 @@
 
 #!/usr/bin/python3
 
-from textwrap import wrap
+import seaborn as sns
+from matplotlib.ticker import AutoMinorLocator
+from statistics import mean, stdev
 import os
 import json
 import math
+import statistics
 import numpy as np
 import pandas as pd
 from copy import deepcopy
+from matplotlib_venn import venn2
 import matplotlib.pyplot as plt
 from feature import Feature
 from proteoform import Proteoform
 from itertools import groupby
-import matplotlib.ticker as ticker
+
+AXEX_SIZE = 10
+SMALL_SIZE = 12
+MEDIUM_SIZE = 12
+BIGGER_SIZE = 16
+
+plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=SMALL_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
+plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 
 def get_mz(mass, charge):
@@ -99,7 +115,10 @@ def get_proteoform(proteoform_file, prsm_dir, inte_dict=None, dtype="DDA"):
 
         rt = -1
         if 'Retention time' in data:
-            rt = data['Retention time']/60
+            if dtype == "DDA":
+                rt = data['Retention time']/60
+            else:
+                rt = data['Retention time']
 
         apex_rt = -1
         if 'Feature apex time' in data:
@@ -221,23 +240,23 @@ def _getOverlappingProteoforms(temp_proteoforms, proteoform, time_tol):
     return overlapping
 
 
-def get_common_proteoforms(proteoforms_1, proteoforms_2, tolerance=15E-6, time_tol=1.0):
-    proteoforms_1_copy = deepcopy(proteoforms_1)
-    proteoforms_1_copy.sort(key=lambda x: (x is None, x.intensity), reverse=True)
-    proteoforms_2_copy = deepcopy(proteoforms_2)
-    proteoforms_2_copy.sort(key=lambda x: (x is None, x.mass), reverse=False)
+def get_common_proteoforms(DIA_proteoforms, DDA_proteoforms, tolerance=15E-6, time_tol=5):
+    DIA_proteoforms_copy = deepcopy(DIA_proteoforms)
+    DIA_proteoforms_copy.sort(key=lambda x: (x is None, x.intensity), reverse=True)
+    DDA_proteoforms_copy = deepcopy(DDA_proteoforms)
+    DDA_proteoforms_copy.sort(key=lambda x: (x is None, x.mass), reverse=False)
     # Get common features based on the RT overlap
     common_proteoforms = []
-    for idx in range(0, len(proteoforms_1_copy)):
-        proteoform = proteoforms_1_copy[idx]
+    for idx in range(0, len(DIA_proteoforms_copy)):
+        proteoform = DIA_proteoforms_copy[idx]
         if hasattr(proteoform, 'used'):
             continue
         else:
-            overlapping_proteoforms = _getMatchedProteoforms(proteoforms_2_copy, proteoform, tolerance)
+            overlapping_proteoforms = _getMatchedProteoforms(DDA_proteoforms_copy, proteoform, tolerance)
             if len(overlapping_proteoforms) > 0:
                 apex_diff = [abs(proteoform.rt - p.rt) for p in overlapping_proteoforms]
                 selected_proteoform = overlapping_proteoforms[apex_diff.index(min(apex_diff))]
-                proteoforms_2_copy[proteoforms_2_copy.index(selected_proteoform)].used = True
+                DDA_proteoforms_copy[DDA_proteoforms_copy.index(selected_proteoform)].used = True
                 common_proteoforms.append((proteoform, selected_proteoform))
     return common_proteoforms
 
@@ -446,7 +465,7 @@ def remove_duplicate_proteoforms(proteoforms_original, ppm_tole=10E-6):
 
 
 if __name__ == '__main__':
-    file_dir = os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.getcwd())), "TopDIA_Published_Data"), r"04_test_data")
+    # file_dir = os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.getcwd())), "TopDIA_Published_Data"), r"04_test_data")
     mass_ranges = ["720_800", "800_880", "880_960", "960_1040", "1040_1120", "1120_1200"]
     isolation_window_base = [[722, 726, 730, 734, 738, 742, 746, 750, 754, 758, 762, 766, 770, 774, 778, 782, 786, 790, 794, 798],
                              [802, 806, 810, 814, 818, 822, 826, 830, 834, 838, 842, 846, 850, 854, 858, 862, 866, 870, 874, 878],
@@ -455,257 +474,277 @@ if __name__ == '__main__':
                              [1042, 1046, 1050, 1054, 1058, 1062, 1066, 1070, 1074, 1078, 1082, 1086, 1090, 1094, 1098, 1102, 1106, 1110, 1114, 1118],
                              [1122, 1126, 1130, 1134, 1138, 1142, 1146, 1150, 1154, 1158, 1162, 1166, 1170, 1174, 1178, 1182, 1186, 1190, 1194, 1198]]
 
-    #########################################
-    print("Replicate 2")
-    all_dda_proteins_1 = []
-    all_dia_proteins_1 = []
-    all_dda_proteoforms_1 = []
-    all_dia_proteoforms_1 = []
-    DDA_proteoforms_data_1 = []
-    DIA_proteoforms_data_1 = []
-    replicate = 2
-    for mass_range_idx in range(0, len(mass_ranges)):
-        mass_range = mass_ranges[mass_range_idx]
-        DDA_target_file = "20231117_DDA_" + mass_range + "_rep" + str(replicate)
-        proteoform_file = os.path.join(file_dir, DDA_target_file + '_ms2_toppic_proteoform_single.tsv')
-        prsm_dir = os.path.join(file_dir, DDA_target_file + "_html\prsms")
-        ms1_feature_file = os.path.join(os.path.join(file_dir, "ms1_features_mzrt"), DDA_target_file + "_frac.mzrt.csv")
-        ms1_features = get_features(ms1_feature_file)
-        proteoforms_original = get_proteoform(proteoform_file, prsm_dir)
-        assign_rt(proteoforms_original, ms1_features)
-        proteoforms = remove_duplicate_proteoforms(proteoforms_original)
-        proteins = set([p.accession for p in proteoforms])
-        print("DDA - Proteoforms:", len(proteoforms_original),  "- Filtered Proteoforms:", len(proteoforms), "- Proteins:", len(proteins))
-        all_dda_proteins_1.append(proteins)
-        all_dda_proteoforms_1.append(proteoforms)
-        DDA_proteoforms_data_1.extend(proteoforms_original)
+    all_dda_proteins_data = []
+    all_dia_proteins_data = []
+    all_common_proteins_data = []
+    all_dda_proteoforms_data = []
+    all_dia_proteoforms_data = []
+    all_common_proteoforms_data = []
 
-        DIA_target_file = "20231117_DIA_" + mass_range + "_rep" + str(replicate)
-        proteoform_file = os.path.join(file_dir, DIA_target_file + '_pseudo_ms2_toppic_proteoform_single.tsv')
-        msalign_file = os.path.join(file_dir, DIA_target_file + "_pseudo_ms2.msalign")
-        inte_dict = get_proteoform_inte_dict(msalign_file)
-        prsm_dir = os.path.join(file_dir, DIA_target_file + "_pseudo_html\prsms")
-        ms1_feature_file = os.path.join(os.path.join(file_dir, "ms1_features_mzrt"), DIA_target_file + "_frac_ms1.mzrt.csv")
-        ms1_features = get_features(ms1_feature_file)
-        DIA_proteoforms_original = get_proteoform(proteoform_file, prsm_dir, inte_dict)
-        assign_rt(DIA_proteoforms_original, ms1_features)
-        DIA_proteoforms = remove_duplicate_proteoforms(DIA_proteoforms_original)
-        DIA_proteins = set([p.accession for p in DIA_proteoforms])
-        print("DIA - Proteoforms:", len(DIA_proteoforms_original), "- Filtered Proteoforms:", len(DIA_proteoforms), "- Proteins:", len(DIA_proteins))
-        all_dia_proteins_1.append(DIA_proteins)
-        all_dia_proteoforms_1.append(DIA_proteoforms)
-        DIA_proteoforms_data_1.extend(DIA_proteoforms_original)
+    dda_unique_proteoform_data = []
+    dia_unique_proteoform_data = []
+    common_proteoform_data = []
+    dda_unique_protein_data = []
+    dia_unique_protein_data = []
+    common_protein_data = []
 
-    #########################################
-    print("Replicate 3")
-    all_dda_proteins_2 = []
-    all_dia_proteins_2 = []
-    all_dda_proteoforms_2 = []
-    all_dia_proteoforms_2 = []
-    DDA_proteoforms_data_2 = []
-    DIA_proteoforms_data_2 = []
-    replicate = 3
-    for mass_range_idx in range(0, len(mass_ranges)):
-        mass_range = mass_ranges[mass_range_idx]
-        DDA_target_file = "20231117_DDA_" + mass_range + "_rep" + str(replicate)
-        proteoform_file = os.path.join(file_dir, DDA_target_file + '_ms2_toppic_proteoform_single.tsv')
-        prsm_dir = os.path.join(file_dir, DDA_target_file + "_html\prsms")
-        ms1_feature_file = os.path.join(os.path.join(file_dir, "ms1_features_mzrt"), DDA_target_file + "_frac.mzrt.csv")
-        ms1_features = get_features(ms1_feature_file)
-        proteoforms_original = get_proteoform(proteoform_file, prsm_dir)
-        assign_rt(proteoforms_original, ms1_features)
-        proteoforms = remove_duplicate_proteoforms(proteoforms_original)
-        proteins = set([p.accession for p in proteoforms])
-        print("DDA - Proteoforms:", len(proteoforms_original),  "- Filtered Proteoforms:", len(proteoforms), "- Proteins:", len(proteins))
-        all_dda_proteins_2.append(proteins)
-        all_dda_proteoforms_2.append(proteoforms)
-        DDA_proteoforms_data_2.extend(proteoforms_original)
+    file_dir = r"C:\Users\Abdul\Tulane University\Liu, Kevin - 202210_topdia_abdul\TopDIA_Published_Data\04_test_data"
+    replicates = [2, 3]
+    for replicate in replicates:
+        print("Processing Replicate:", replicate)
+        DDA_proteoforms_data = []
+        DIA_proteoforms_data = []
+        all_dda_proteins = []
+        all_dia_proteins = []
+        all_common_proteins = []
+        all_dda_proteoforms = []
+        all_dia_proteoforms = []
+        all_common_proteoforms = []
+        DIA_matched_peaks_shared = []
+        DDA_matched_peaks_shared = []
+        DIA_num_peaks_shared = []
+        DDA_num_peaks_shared = []
+        DIA_inte_common = []
+        DDA_inte_common = []
+        DIA_inte_unique = []
+        DDA_inte_unique = []
+        for mass_range_idx in range(0, len(mass_ranges)):
+            mass_range = mass_ranges[mass_range_idx]
+            target_file = "20231117_DIA_" + mass_range + "_rep" + str(replicate)
+            proteoform_file = os.path.join(file_dir, target_file + '_ms2_toppic_proteoform_single.tsv')
+            prsm_dir = os.path.join(file_dir, target_file + "_html\prsms")
+            ms1_feature_file = os.path.join(os.path.join(file_dir, "ms1_features_mzrt_toppic_pipeline"), target_file + "_frac.mzrt.csv")
+            ms1_features = get_features(ms1_feature_file)
+            proteoforms_original = get_proteoform(proteoform_file, prsm_dir)
+            assign_rt(proteoforms_original, ms1_features)
+            proteoforms = remove_duplicate_proteoforms(proteoforms_original)
+            proteins = set([p.accession for p in proteoforms])
 
-        DIA_target_file = "20231117_DIA_" + mass_range + "_rep" + str(replicate)
-        proteoform_file = os.path.join(file_dir, DIA_target_file + '_pseudo_ms2_toppic_proteoform_single.tsv')
-        msalign_file = os.path.join(file_dir, DIA_target_file + "_pseudo_ms2.msalign")
-        inte_dict = get_proteoform_inte_dict(msalign_file)
-        prsm_dir = os.path.join(file_dir, DIA_target_file + "_pseudo_html\prsms")
-        ms1_feature_file = os.path.join(os.path.join(file_dir, "ms1_features_mzrt"), DIA_target_file + "_frac_ms1.mzrt.csv")
-        ms1_features = get_features(ms1_feature_file)
-        DIA_proteoforms_original = get_proteoform(proteoform_file, prsm_dir, inte_dict)
-        assign_rt(DIA_proteoforms_original, ms1_features)
-        DIA_proteoforms = remove_duplicate_proteoforms(DIA_proteoforms_original)
-        DIA_proteins = set([p.accession for p in DIA_proteoforms])
-        print("DIA - Proteoforms:", len(DIA_proteoforms_original), "- Filtered Proteoforms:", len(DIA_proteoforms), "- Proteins:", len(DIA_proteins))
-        all_dia_proteins_2.append(DIA_proteins)
-        all_dia_proteoforms_2.append(DIA_proteoforms)
-        DIA_proteoforms_data_2.extend(DIA_proteoforms_original)
+            DIA_target_file = "20231117_DIA_" + mass_range + "_rep" + str(replicate)
+            proteoform_file = os.path.join(file_dir, DIA_target_file + '_pseudo_ms2_toppic_proteoform_single.tsv')
+            msalign_file = os.path.join(file_dir, DIA_target_file + "_pseudo_ms2.msalign")
+            inte_dict = get_proteoform_inte_dict(msalign_file)
+            prsm_dir = os.path.join(file_dir, DIA_target_file + "_pseudo_html\prsms")
+            ms1_feature_file = os.path.join(os.path.join(file_dir, "ms1_features_mzrt"), DIA_target_file + "_frac_ms1.mzrt.csv")
+            ms1_features = get_features(ms1_feature_file)
+            DIA_proteoforms_original = get_proteoform(proteoform_file, prsm_dir, inte_dict, "DIA")
+            assign_rt(DIA_proteoforms_original, ms1_features)
+            DIA_proteoforms = remove_duplicate_proteoforms(DIA_proteoforms_original)
+            DIA_proteins = set([p.accession for p in DIA_proteoforms])
 
-    ############################################################################
-    # Compute Overlap Coefficients
-    print("*** Overlap coefficient for each m/z range ***")
-    proteoform_num = []
+            common = len(DIA_proteins.intersection(proteins))
+            common_proteoforms = get_common_proteoforms(DIA_proteoforms, proteoforms)
+
+            all_dda_proteins.append(len(proteins))
+            all_dia_proteins.append(len(DIA_proteins))
+            all_common_proteins.append(common)
+
+            all_dda_proteoforms.append(len(proteoforms))
+            all_dia_proteoforms.append(len(DIA_proteoforms))
+            all_common_proteoforms.append(len(common_proteoforms))
+            print("Pseudo - Proteoforms:", len(DIA_proteoforms_original),
+                  "- Filtered Proteoforms:", len(DIA_proteoforms), "- Proteins:", len(DIA_proteins))
+            print("TopPIC - Proteoforms:", len(proteoforms_original), "- Filtered Proteoforms:", len(proteoforms), "- Proteins:", len(proteins))
+            print("TopPIC - Pseudo: common proteoforms", len(common_proteoforms), "- common proteins", common, "\n")
+
+            # matched peaks
+            DIA_matched_peaks_temp, DDA_matched_peaks_temp, DIA_num_peaks_temp, DDA_num_peaks_temp = get_matched_peaks(common_proteoforms)
+            DIA_matched_peaks_shared.append(DIA_matched_peaks_temp)
+            DDA_matched_peaks_shared.append(DDA_matched_peaks_temp)
+            DIA_num_peaks_shared.append(DIA_num_peaks_temp)
+            DDA_num_peaks_shared.append(DDA_num_peaks_temp)
+
+            # peaks intensity - shared vs unique
+            DIA_common_proteoforms_inte = [math.log2(pair[0].intensity) for pair in common_proteoforms]
+            DDA_common_proteoforms_inte = [math.log2(pair[1].intensity) for pair in common_proteoforms]
+            DIA_inte_common.append(DIA_common_proteoforms_inte)
+            DDA_inte_common.append(DDA_common_proteoforms_inte)
+            DIA_unique_proteoforms = [p for p in DIA_proteoforms if p.intensity not in DIA_common_proteoforms_inte]
+            DDA_unique_proteoforms = [p for p in proteoforms if p.intensity not in DDA_common_proteoforms_inte]
+            DIA_unique_proteoforms_inte = [math.log2(pair.intensity) for pair in DIA_unique_proteoforms]
+            DDA_unique_proteoforms_inte = [math.log2(pair.intensity) for pair in DDA_unique_proteoforms]
+            DIA_inte_unique.append(DIA_unique_proteoforms_inte)
+            DDA_inte_unique.append(DDA_unique_proteoforms_inte)
+
+            DDA_proteoforms_data.extend(proteoforms_original)
+            DIA_proteoforms_data.extend(DIA_proteoforms_original)
+
+        # For combined data
+        DIA_proteoforms_data = remove_duplicate_proteoforms(DIA_proteoforms_data)
+        DDA_proteoforms_data = remove_duplicate_proteoforms(DDA_proteoforms_data)
+        DIA_proteins = set([p.accession for p in DIA_proteoforms_data])
+        DDA_proteins = set([p.accession for p in DDA_proteoforms_data])
+        print("Pseudo Proteoforms:", len(DIA_proteoforms_data), "- Proteins:", len(DIA_proteins))
+        print("TopPIC Proteoforms:", len(DDA_proteoforms_data), "- Proteins:", len(DDA_proteins))
+
+        common_proteoforms = get_common_proteoforms(DIA_proteoforms_data, DDA_proteoforms_data)
+        dda_unique_prot = len(DDA_proteoforms_data) - len(common_proteoforms)
+        dia_unique_prot = len(DIA_proteoforms_data) - len(common_proteoforms)
+        common = len(DIA_proteins.intersection(DDA_proteins))
+        common_prot = len(common_proteoforms)
+        dda_unique = len(DDA_proteins) - common
+        dia_unique = len(DIA_proteins) - common
+        print("TopPIC - Pseudo: common proteoforms", len(common_proteoforms), round((len(common_proteoforms)/len(DDA_proteoforms_data)) * 100, 3))
+        print("TopPIC - Pseudo: common proteins", common, round((common/len(DDA_proteins)) * 100, 3))
+
+        # #############
+        # matched peaks
+        DIA_matched_peaks_temp, DDA_matched_peaks_temp, DIA_num_peaks_temp, DDA_num_peaks_temp = get_matched_peaks(common_proteoforms)
+        DIA_matched_peaks_shared_num = sum([len(i) for i in DIA_matched_peaks_temp])
+        DIA_matched_peaks_shared_len = len([len(i) for i in DIA_matched_peaks_temp])
+        DDA_matched_peaks_shared_num = sum([len(i) for i in DDA_matched_peaks_temp])
+        DDA_matched_peaks_shared_len = len([len(i) for i in DDA_matched_peaks_temp])
+
+        DIA_num_peaks_shared_num = sum(DIA_num_peaks_temp)
+        DIA_num_peaks_shared_len = len(DIA_num_peaks_temp)
+        DDA_num_peaks_shared_num = sum(DDA_num_peaks_temp)
+        DDA_num_peaks_shared_len = len(DDA_num_peaks_temp)
+
+        dda_matched_peaks_per_scan = round(DDA_matched_peaks_shared_num/DDA_matched_peaks_shared_len, 3)
+        dia_matched_peaks_per_scan = round(DIA_matched_peaks_shared_num/DIA_matched_peaks_shared_len, 3)
+
+        dda_peaks_per_scan = round(DDA_num_peaks_shared_num/DDA_num_peaks_shared_len, 3)
+        dia_peaks_per_scan = round(DIA_num_peaks_shared_num/DIA_num_peaks_shared_len, 3)
+
+        print("Matched Peaks per common Scan (TopPIC vs Pseudo):", dda_matched_peaks_per_scan, dia_matched_peaks_per_scan)
+        print("Num Peaks per common Scan (TopPIC vs Pseudo):", dda_peaks_per_scan, dia_peaks_per_scan)
+        print("Ratio Peaks per common Scan (TopPIC vs Pseudo):", round(dda_matched_peaks_per_scan /
+              dda_peaks_per_scan*100, 3), round(dia_matched_peaks_per_scan/dia_peaks_per_scan*100, 3), "\n")
+
+        # 2d matched peaks plot
+        DIA_matched_peaks_temp, DDA_matched_peaks_temp, DIA_num_peaks_temp, DDA_num_peaks_temp = get_matched_peaks(common_proteoforms)
+        DIA_matched_peaks_shared_num = [len(i) for i in DIA_matched_peaks_temp]
+        DDA_matched_peaks_shared_num = [len(i) for i in DDA_matched_peaks_temp]
+        plt.Figure()
+        sns.regplot(x='Number of Peaks', y='Number of Matched Peaks', data=pd.DataFrame(
+            {'Number of Peaks': DIA_num_peaks_temp, 'Number of Matched Peaks': DIA_matched_peaks_shared_num}), marker='.', label="DIA")
+        sns.regplot(x='Number of Peaks', y='Number of Matched Peaks', data=pd.DataFrame(
+            {'Number of Peaks': DDA_num_peaks_temp, 'Number of Matched Peaks': DDA_matched_peaks_shared_num}), marker='.', label="DDA")
+        plt.legend()
+        # plt.savefig("01_matched_peaks_2d_toppic_" + str(replicate) + ".jpg", dpi=2000)
+        plt.show()
+        plt.close()
+
+        all_dda_proteins_data.append(all_dda_proteins)
+        all_dia_proteins_data.append(all_dia_proteins)
+        all_common_proteins_data.append(all_common_proteins)
+        all_dda_proteoforms_data.append(all_dda_proteoforms)
+        all_dia_proteoforms_data.append(all_dia_proteoforms)
+        all_common_proteoforms_data.append(all_common_proteoforms)
+
+        dda_unique_proteoform_data.append(dda_unique_prot)
+        dia_unique_proteoform_data.append(dia_unique_prot)
+        common_proteoform_data.append(common_prot)
+        dda_unique_protein_data.append(dda_unique)
+        dia_unique_protein_data.append(dia_unique)
+        common_protein_data.append(common)
+
+    # ###################
+    mean_dda_proteins_data = []
+    mean_dia_proteins_data = []
+    mean_common_proteins_data = []
+    mean_dda_proteoforms_data = []
+    mean_dia_proteoforms_data = []
+    mean_common_proteoforms_data = []
+
+    stddev_dda_proteins_data = []
+    stddev_dia_proteins_data = []
+    stddev_common_proteins_data = []
+    stddev_dda_proteoforms_data = []
+    stddev_dia_proteoforms_data = []
+    stddev_common_proteoforms_data = []
+
     for i in range(0, len(mass_ranges)):
-        proteoform_num.append([min(len(all_dia_proteoforms_1[i]), len(all_dda_proteoforms_1[i])),
-                              min(len(all_dia_proteoforms_2[i]), len(all_dda_proteoforms_2[i]))])
+        mean_dia_proteins_data.append(mean([all_dia_proteins_data[0][i], all_dia_proteins_data[1][i]]))
+        mean_dda_proteins_data.append(mean([all_dda_proteins_data[0][i], all_dda_proteins_data[1][i]]))
+        mean_common_proteins_data.append(mean([all_common_proteins_data[0][i], all_common_proteins_data[1][i]]))
 
-    print("Replicate 2")
-    # DIA comparison
-    dia_common_proteins = []
-    dia_common_proteoforms = []
-    dia_common_proteins_percent = []
-    dia_common_proteoforms_percent = []
-    for i in range(0, len(mass_ranges)):
-        proteoforms_1 = all_dia_proteoforms_1[i]
-        proteoforms_1.sort(key=lambda x: x.evalue, reverse=False)
-        proteoforms_1 = proteoforms_1[0:proteoform_num[i][0]]
-        proteins_1 = set([p.accession for p in proteoforms_1])
-        proteoforms_2 = all_dia_proteoforms_2[i]
-        proteoforms_2.sort(key=lambda x: x.evalue, reverse=False)
-        proteoforms_2 = proteoforms_2[0:proteoform_num[i][1]]
-        proteins_2 = set([p.accession for p in proteoforms_2])
-        common_proteoforms = get_common_proteoforms(proteoforms_1, proteoforms_2)
-        overlap_coefficient_proteoforms = len(common_proteoforms)/min(len(proteoforms_1), len(proteoforms_2))
-        common = len(proteins_1.intersection(proteins_2))
-        overlap_coefficient_proteins = common/min(len(proteins_1), len(proteins_2))
-        print("["+mass_ranges[i]+"] - DIA: proteoforms", len(common_proteoforms), "(" + str(round(100 *
-              overlap_coefficient_proteoforms, 3)) + "%)", "- proteins", common, "(" + str(round(100*overlap_coefficient_proteins, 3)) + "%)")
-        dia_common_proteins.append(common)
-        dia_common_proteoforms.append(len(common_proteoforms))
-        dia_common_proteins_percent.append(100*overlap_coefficient_proteins)
-        dia_common_proteoforms_percent.append(100*overlap_coefficient_proteoforms)
+        mean_dia_proteoforms_data.append(mean([all_dia_proteoforms_data[0][i], all_dia_proteoforms_data[1][i]]))
+        mean_dda_proteoforms_data.append(mean([all_dda_proteoforms_data[0][i], all_dda_proteoforms_data[1][i]]))
+        mean_common_proteoforms_data.append(mean([all_common_proteoforms_data[0][i], all_common_proteoforms_data[1][i]]))
 
-    print("Replicate 3")
-    dda_common_proteins = []
-    dda_common_proteoforms = []
-    dda_common_proteins_percent = []
-    dda_common_proteoforms_percent = []
-    for i in range(0, len(mass_ranges)):
-        proteoforms_1 = all_dda_proteoforms_1[i]
-        proteoforms_1.sort(key=lambda x: x.evalue, reverse=False)
-        proteoforms_1 = proteoforms_1[0:proteoform_num[i][0]]
-        proteins_1 = set([p.accession for p in proteoforms_1])
-        proteoforms_2 = all_dda_proteoforms_2[i]
-        proteoforms_2.sort(key=lambda x: x.evalue, reverse=False)
-        proteoforms_2 = proteoforms_2[0:proteoform_num[i][1]]
-        proteins_2 = set([p.accession for p in proteoforms_2])
-        common_proteoforms = get_common_proteoforms(proteoforms_1, proteoforms_2)
-        overlap_coefficient_proteoforms = len(common_proteoforms)/min(len(proteoforms_1), len(proteoforms_2))
-        common = len(proteins_1.intersection(proteins_2))
-        overlap_coefficient_proteins = common/min(len(proteins_1), len(proteins_2))
-        print("["+mass_ranges[i]+"] - DDA: proteoforms", len(common_proteoforms), "(" + str(round(100 *
-              overlap_coefficient_proteoforms, 3)) + "%)", "- proteins", common, "(" + str(round(100*overlap_coefficient_proteins, 3)) + "%)")
-        dda_common_proteins.append(common)
-        dda_common_proteoforms.append(len(common_proteoforms))
-        dda_common_proteins_percent.append(100*overlap_coefficient_proteins)
-        dda_common_proteoforms_percent.append(100*overlap_coefficient_proteoforms)
+        stddev_dda_proteins_data.append(stdev([all_dda_proteins_data[0][i], all_dda_proteins_data[1][i]]))
+        stddev_dia_proteins_data.append(stdev([all_dia_proteins_data[0][i], all_dia_proteins_data[1][i]]))
+        stddev_common_proteins_data.append(stdev([all_common_proteins_data[0][i], all_common_proteins_data[1][i]]))
 
-    ###########################################
-    # PLot overlap coefficient
-    width = 0.4
+        stddev_dda_proteoforms_data.append(stdev([all_dda_proteoforms_data[0][i], all_dda_proteoforms_data[1][i]]))
+        stddev_dia_proteoforms_data.append(stdev([all_dia_proteoforms_data[0][i], all_dia_proteoforms_data[1][i]]))
+        stddev_common_proteoforms_data.append(stdev([all_common_proteoforms_data[0][i], all_common_proteoforms_data[1][i]]))
+
+    ############################
+    width = 0.3
     r = np.arange(len(mass_ranges))
-    fig, axes = plt.subplots(2, 1, sharex=False, sharey=False)
-    axes[0].bar(r, dia_common_proteoforms_percent, color='b', width=width, edgecolor='black', label='DIA')
-    axes[0].bar(r + width, dda_common_proteoforms_percent, color='orange', width=width, edgecolor='black', label='DDA')
+    fig, axes = plt.subplots(2, 1, sharey=False, sharex=True)
+    # Plot for Proteoforms
+    axes[0].bar(r, mean_dia_proteoforms_data, color='r', alpha=0.5, width=width, edgecolor='black', label='DIA')
+    axes[0].bar(r + width, mean_dda_proteoforms_data, color='g', alpha=0.5, width=width, edgecolor='black', label='DDA')
+    axes[0].bar(r + width*2, mean_common_proteoforms_data, color='orange', alpha=0.5, width=width, edgecolor='black', label='Shared')
+    axes[0].yaxis.set_minor_locator(AutoMinorLocator())
     axes[0].xaxis.set_tick_params(labelbottom=False)
-    axes[0].set_ylabel('\n'.join(wrap('Coefficient of proteoforms (%)', 15)))
-    axes[0].yaxis.set_major_locator(ticker.MultipleLocator(20))
-
-    axes[1].bar(r, dia_common_proteins_percent, color='b', width=width, edgecolor='black', label='DIA')
-    axes[1].bar(r + width, dda_common_proteins_percent, color='orange', width=width, edgecolor='black', label='DDA')
+    axes[0].set_ylabel('Proteoforms')
+    # Plot for Proteins
+    axes[1].bar(r, mean_dia_proteins_data, color='r', alpha=0.5, width=width, edgecolor='black', label='DIA')
+    axes[1].bar(r + width, mean_dda_proteins_data, color='g', alpha=0.5, width=width, edgecolor='black', label='DDA')
+    axes[1].bar(r + width*2, mean_common_proteins_data, color='orange', alpha=0.5, width=width, edgecolor='black', label='Shared')
+    axes[1].yaxis.set_minor_locator(AutoMinorLocator())
     axes[1].xaxis.set_tick_params(labelbottom=True)
-    axes[1].set_ylabel('\n'.join(wrap('Coefficient of proteins (%)', 15)))
-    axes[1].yaxis.set_major_locator(ticker.MultipleLocator(20))
-
+    axes[1].set_ylabel('Proteins')
     axes[1].set_xticks(r + width)
     axes[1].set_xticklabels(['[720-800]', '[800-880]', '[880-960]', '[960-1040]', '[1040-1120]', '[1120-1200]'], rotation=25)
-
-    combined_legend_labels = ['DIA', 'DDA']
-    fig.legend(combined_legend_labels, loc='upper center', bbox_to_anchor=(0.5, 1.01), ncol=len(combined_legend_labels))
-    # plt.savefig("01_shared_percent_replicates.png", dpi=2000, bbox_inches='tight')
+    # Add Combined Legend on Top
+    combined_legend_labels = ['Pseudo spectra', 'Single spectra', 'Shared']
+    fig.legend(combined_legend_labels, loc='upper center', bbox_to_anchor=(0.5, 1.0), ncol=len(combined_legend_labels))
+    plt.subplots_adjust(bottom=0.175)
+    # plt.savefig("000_combined_frequency_toppic_" + str(replicate) + ".jpg", dpi=2000, bbox_inches='tight')
     plt.show()
+    plt.close()
 
-    ##################################
-    # Compute overlap coefficient of data
-    print("*** Overlap coefficient of data without filtering ***")
-    DIA_proteoforms_data_rep_1 = remove_duplicate_proteoforms(DIA_proteoforms_data_1)
-    DIA_proteoforms_data_rep_2 = remove_duplicate_proteoforms(DIA_proteoforms_data_2)
-    DDA_proteoforms_data_rep_1 = remove_duplicate_proteoforms(DDA_proteoforms_data_1)
-    DDA_proteoforms_data_rep_2 = remove_duplicate_proteoforms(DDA_proteoforms_data_2)
-    print("DIA -- Proteoforms in Replicate 1: ", len(DIA_proteoforms_data_rep_1), "Proteoforms in Replicate 2: ", len(DIA_proteoforms_data_rep_2))
-    print("DDA -- Proteoforms in Replicate 1: ", len(DDA_proteoforms_data_rep_1), "Proteoforms in Replicate 2: ", len(DDA_proteoforms_data_rep_2))
+    ############################
 
-    DIA_proteoforms_data_rep_1.sort(key=lambda x: x.evalue, reverse=False)
-    DIA_proteoforms_data_rep_2.sort(key=lambda x: x.evalue, reverse=False)
-    DDA_proteoforms_data_rep_1.sort(key=lambda x: x.evalue, reverse=False)
-    DDA_proteoforms_data_rep_2.sort(key=lambda x: x.evalue, reverse=False)
+    plt.Figure()
+    out = venn2(subsets=(dia_unique_proteoform_data[0], dda_unique_proteoform_data[0],
+                common_proteoform_data[0]), set_labels=('Pseudo', 'Single'))
+    for text in out.set_labels:
+        text.set_fontsize(14)
+    for text in out.subset_labels:
+        text.set_fontsize(16)
+    plt.title('Proteoforms', fontsize=16)
+    # plt.savefig("01_venn_Proteoforms_toppic_" + str(replicates[0]) + ".jpg", dpi=2000, bbox_inches='tight')
+    plt.show()
+    plt.close()
 
-    proteoform_num = [min(len(DIA_proteoforms_data_rep_1), len(DDA_proteoforms_data_rep_1)),
-                      min(len(DIA_proteoforms_data_rep_2), len(DDA_proteoforms_data_rep_2))]
+    plt.figure()
+    out = venn2(subsets=(dia_unique_proteoform_data[1], dda_unique_proteoform_data[1],
+                common_proteoform_data[1]), set_labels=('Pseudo', 'Single'))
+    for text in out.set_labels:
+        text.set_fontsize(14)
+    for text in out.subset_labels:
+        text.set_fontsize(16)
+    plt.title('Proteoforms', fontsize=16)
+    # plt.savefig("01_venn_Proteoforms_toppic_" + str(replicates[1]) + ".jpg", dpi=2000, bbox_inches='tight')
+    plt.show()
+    plt.close()
 
-    DIA_proteoforms_data_rep_1 = DIA_proteoforms_data_rep_1[0:proteoform_num[0]]
-    DDA_proteoforms_data_rep_1 = DDA_proteoforms_data_rep_1[0:proteoform_num[0]]
-    DIA_proteoforms_data_rep_2 = DIA_proteoforms_data_rep_2[0:proteoform_num[1]]
-    DDA_proteoforms_data_rep_2 = DDA_proteoforms_data_rep_2[0:proteoform_num[1]]
-    print("DIA -- Proteoforms in Replicate 1: ", len(DIA_proteoforms_data_rep_1), "Proteoforms in Replicate 2: ", len(DIA_proteoforms_data_rep_2))
-    print("DDA -- Proteoforms in Replicate 1: ", len(DDA_proteoforms_data_rep_1), "Proteoforms in Replicate 2: ", len(DDA_proteoforms_data_rep_2))
+    plt.figure()
+    out = venn2(subsets=(dia_unique_protein_data[0], dda_unique_protein_data[0],
+                common_protein_data[0]), set_labels=('Pseudo', 'Single'))
+    for text in out.set_labels:
+        text.set_fontsize(14)
+    for text in out.subset_labels:
+        text.set_fontsize(16)
+    plt.title('Proteins', fontsize=16)
+    # plt.savefig("01_venn_Proteins_toppic_" + str(replicates[0]) + ".jpg", dpi=2000, bbox_inches='tight')
+    plt.show()
+    plt.close()
 
-    DIA_proteins_1 = set([p.accession for p in DIA_proteoforms_data_rep_1])
-    DIA_proteins_2 = set([p.accession for p in DIA_proteoforms_data_rep_2])
-    DDA_proteins_1 = set([p.accession for p in DDA_proteoforms_data_rep_1])
-    DDA_proteins_2 = set([p.accession for p in DDA_proteoforms_data_rep_2])
-    print("DIA -- Proteins in Replicate 1: ", len(DIA_proteins_1), "Proteins in Replicate 2: ", len(DIA_proteins_2))
-    print("DDA -- Proteins in Replicate 1: ", len(DDA_proteins_1), "Proteins in Replicate 2: ", len(DDA_proteins_2))
-
-    # DIA
-    common_proteoforms_DIA = get_common_proteoforms(DIA_proteoforms_data_rep_1, DIA_proteoforms_data_rep_2)
-    common = len(DIA_proteins_1.intersection(DIA_proteins_2))
-    overlap_coefficient_proteoforms = len(common_proteoforms_DIA)/min(len(DIA_proteoforms_data_rep_1), len(DIA_proteoforms_data_rep_2))
-    overlap_coefficient_proteins = common/min(len(DIA_proteins_1), len(DIA_proteins_2))
-    print("DIA: common proteoforms", len(common_proteoforms_DIA), "(" + str(round(100 * overlap_coefficient_proteoforms, 3)) + "%)",
-          "- common proteins", common, "(" + str(round(100*overlap_coefficient_proteins, 3)) + "%)")
-
-    # DDA
-    common_proteoforms_DDA = get_common_proteoforms(DDA_proteoforms_data_rep_1, DDA_proteoforms_data_rep_2)
-    common = len(DDA_proteins_1.intersection(DDA_proteins_2))
-    overlap_coefficient_proteoforms = len(common_proteoforms_DDA)/min(len(DDA_proteoforms_data_rep_1), len(DDA_proteoforms_data_rep_2))
-    overlap_coefficient_proteins = common/min(len(DDA_proteins_1), len(DDA_proteins_2))
-    print("DDA: common proteoforms", len(common_proteoforms_DDA), "(" + str(round(100 * overlap_coefficient_proteoforms, 3)) + "%)",
-          "- common proteins", common, "(" + str(round(100*overlap_coefficient_proteins, 3)) + "%)")
-
-    ##################################
-    # Compute overlap coefficient of data
-    print("*** Overlap coefficient of data without filtering ***")
-    DIA_proteoforms_data_rep_1 = remove_duplicate_proteoforms(DIA_proteoforms_data_1)
-    DIA_proteoforms_data_rep_2 = remove_duplicate_proteoforms(DIA_proteoforms_data_2)
-    DDA_proteoforms_data_rep_1 = remove_duplicate_proteoforms(DDA_proteoforms_data_1)
-    DDA_proteoforms_data_rep_2 = remove_duplicate_proteoforms(DDA_proteoforms_data_2)
-    print("DIA -- Proteoforms in Replicate 1: ", len(DIA_proteoforms_data_rep_1), "Proteoforms in Replicate 2: ", len(DIA_proteoforms_data_rep_2))
-    print("DDA -- Proteoforms in Replicate 1: ", len(DDA_proteoforms_data_rep_1), "Proteoforms in Replicate 2: ", len(DDA_proteoforms_data_rep_2))
-
-    DIA_proteoforms_data_rep_1.sort(key=lambda x: x.evalue, reverse=False)
-    DIA_proteoforms_data_rep_2.sort(key=lambda x: x.evalue, reverse=False)
-    DDA_proteoforms_data_rep_1.sort(key=lambda x: x.evalue, reverse=False)
-    DDA_proteoforms_data_rep_2.sort(key=lambda x: x.evalue, reverse=False)
-
-    proteoform_num = [min(len(DIA_proteoforms_data_rep_1), len(DDA_proteoforms_data_rep_1)),
-                      min(len(DIA_proteoforms_data_rep_2), len(DDA_proteoforms_data_rep_2))]
-
-    DIA_proteins_1 = set([p.accession for p in DIA_proteoforms_data_rep_1])
-    DIA_proteins_2 = set([p.accession for p in DIA_proteoforms_data_rep_2])
-    DDA_proteins_1 = set([p.accession for p in DDA_proteoforms_data_rep_1])
-    DDA_proteins_2 = set([p.accession for p in DDA_proteoforms_data_rep_2])
-    print("DIA -- Proteins in Replicate 1: ", len(DIA_proteins_1), "Proteins in Replicate 2: ", len(DIA_proteins_2))
-    print("DDA -- Proteins in Replicate 1: ", len(DDA_proteins_1), "Proteins in Replicate 2: ", len(DDA_proteins_2))
-
-    # DIA
-    common_proteoforms_DIA = get_common_proteoforms(DIA_proteoforms_data_rep_1, DIA_proteoforms_data_rep_2)
-    common = len(DIA_proteins_1.intersection(DIA_proteins_2))
-    overlap_coefficient_proteoforms = len(common_proteoforms_DIA)/min(len(DIA_proteoforms_data_rep_1), len(DIA_proteoforms_data_rep_2))
-    overlap_coefficient_proteins = common/min(len(DIA_proteins_1), len(DIA_proteins_2))
-    print("DIA: common proteoforms", len(common_proteoforms_DIA), "(" + str(round(100 * overlap_coefficient_proteoforms, 3)) + "%)",
-          "- common proteins", common, "(" + str(round(100*overlap_coefficient_proteins, 3)) + "%)")
-
-    # DDA
-    common_proteoforms_DDA = get_common_proteoforms(DDA_proteoforms_data_rep_1, DDA_proteoforms_data_rep_2)
-    common = len(DDA_proteins_1.intersection(DDA_proteins_2))
-    overlap_coefficient_proteoforms = len(common_proteoforms_DDA)/min(len(DDA_proteoforms_data_rep_1), len(DDA_proteoforms_data_rep_2))
-    overlap_coefficient_proteins = common/min(len(DDA_proteins_1), len(DDA_proteins_2))
-    print("DDA: common proteoforms", len(common_proteoforms_DDA), "(" + str(round(100 * overlap_coefficient_proteoforms, 3)) + "%)",
-          "- common proteins", common, "(" + str(round(100*overlap_coefficient_proteins, 3)) + "%)")
+    plt.figure()
+    out = venn2(subsets=(dia_unique_protein_data[1], dda_unique_protein_data[1],
+                common_protein_data[1]), set_labels=('Pseudo', 'Single'))
+    for text in out.set_labels:
+        text.set_fontsize(14)
+    for text in out.subset_labels:
+        text.set_fontsize(16)
+    plt.title('Proteins', fontsize=16)
+    # plt.savefig("01_venn_Proteins_toppic_" + str(replicates[1]) + ".jpg", dpi=2000, bbox_inches='tight')
+    plt.show()
+    plt.close()
